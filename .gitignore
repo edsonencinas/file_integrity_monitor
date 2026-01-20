@@ -1,4 +1,4 @@
 # Ignnore log files
-logs/fim_logs_*
+logs/fim.log
 baseline.json
 tempCodeRunnerFile.py

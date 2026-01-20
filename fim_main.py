@@ -1,9 +1,25 @@
 import hashlib
 import os
 import json
+import logging
 from pathlib import Path
+
 BASE_DIR = Path(__file__).resolve().parent
-#LOG_DIR = BASE_DIR / "logs"
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+LOG_FILE = LOG_DIR / "fim.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger("FIM")
 
 def get_file_hash(file_path, algorithm="sha256"):
     """
@@ -13,7 +29,7 @@ def get_file_hash(file_path, algorithm="sha256"):
     """
     file_path=Path(file_path)
     if not file_path.is_file():    
-        print(f"[ERROR] File not found: {file_path}")
+        logger.error(f"File not found: {file_path}")
         return None
 
     try:
@@ -21,15 +37,17 @@ def get_file_hash(file_path, algorithm="sha256"):
 
         with file_path.open("rb") as file:        
             for chunk in iter(lambda: file.read(4096), b""):
-                hash_func.update(chunk)        
+                hash_func.update(chunk) 
+
+        logger.info(f"Hashed file: {file_path}")       
         return hash_func.hexdigest()
 
     except ValueError:
-        print(f"[ERROR] Unsupported hash algorithm: {algorithm}")
+        logger.error(f"Unsupported hash algorithm: {algorithm}")
     except PermissionError:
-        print(f"[ERROR] Permission denied: {file_path}")
+        logger.error(f"Permission denied: {file_path}")
     except Exception as e:
-        print(f"[ERROR] {e}")
+        logger.error(f"Unexpected error hashing {file_path}: {e}")
 
     return None
 
@@ -44,9 +62,11 @@ def scan_and_hash_directory(directory_path, algorithm="sha256"):
     directory_path = Path(directory_path)
     file_hashes = {}
 
-    if not directory_path.is_dir():
-        print(f"[ERROR] Directory not found: {directory_path}")
+    if not directory_path.is_dir():        
+        logger.error(f"Directory not found: {directory_path}")
         return file_hashes
+    
+    logger.info(f"Starting scan: {directory_path}")
 
     for file_path in directory_path.rglob("*"):
         if file_path.is_file():
@@ -56,6 +76,7 @@ def scan_and_hash_directory(directory_path, algorithm="sha256"):
                 relative_path = file_path.relative_to(directory_path)
                 file_hashes[str(relative_path)] = file_hash
 
+    logger.info(f"Scan completed. Files hashed: {len(file_hashes)}")
     return file_hashes
 
 def load_baseline(baseline_file):
@@ -111,23 +132,17 @@ def compare_with_baseline(baseline_hashes, current_hashes):
 
 def print_changes(changes):
     if not any(changes.values()):
-        print("[INFO] No file changes detected.")
+        logger.info("No file changes detected.")
         return
 
-    if changes["modified"]:
-        print("\n[MODIFIED FILES]")
-        for file in changes["modified"]:
-            print(f" - {file}")
+    for file in changes["added"]:
+        logger.warning(f"New file detected: {file}")
 
-    if changes["new"]:
-        print("\n[NEW FILES]")
-        for file in changes["new"]:
-            print(f" + {file}")
+    for file in changes["removed"]:
+        logger.warning(f"File removed: {file}")
 
-    if changes["deleted"]:
-        print("\n[DELETED FILES]")
-        for file in changes["deleted"]:
-            print(f" - {file}")
+    for file in changes["modified"]:
+        logger.critical(f"File modified: {file}")
 
 # IMPLEMENTATION
 WATCHED_DIR = BASE_DIR / "watched"
