@@ -58,16 +58,92 @@ def scan_and_hash_directory(directory_path, algorithm="sha256"):
 
     return file_hashes
 
+def load_baseline(baseline_file):
+    """
+    Load baseline hashes from a JSON file.
 
-#Call the Scan directory recursive
+    :param baseline_file: Path to baseline.json
+    :return: Dictionary {relative_path: hash}
+    """
+    try:
+        with open(baseline_file, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"[ERROR] Baseline file not found: {baseline_file}")
+    except json.JSONDecodeError:
+        print(f"[ERROR] Invalid JSON in baseline file: {baseline_file}")
+    except Exception as e:
+        print(f"[ERROR] {e}")
+
+    return {}
+
+def compare_with_baseline(baseline_hashes, current_hashes):
+    """
+    Compare baseline hashes with current hashes.
+
+    :param baseline_hashes: Dict from baseline.json
+    :param current_hashes: Dict from current scan
+    :return: Dict with detected changes
+    """
+    changes = {
+        "modified": [],
+        "new": [],
+        "deleted": []
+    }
+
+    baseline_files = set(baseline_hashes.keys())
+    current_files = set(current_hashes.keys())
+
+    # Modified files
+    for file in baseline_files & current_files:
+        if baseline_hashes[file] != current_hashes[file]:
+            changes["modified"].append(file)
+
+    # New files
+    for file in current_files - baseline_files:
+        changes["new"].append(file)
+
+    # Deleted files
+    for file in baseline_files - current_files:
+        changes["deleted"].append(file)
+
+    return changes
+
+def print_changes(changes):
+    if not any(changes.values()):
+        print("[INFO] No file changes detected.")
+        return
+
+    if changes["modified"]:
+        print("\n[MODIFIED FILES]")
+        for file in changes["modified"]:
+            print(f" - {file}")
+
+    if changes["new"]:
+        print("\n[NEW FILES]")
+        for file in changes["new"]:
+            print(f" + {file}")
+
+    if changes["deleted"]:
+        print("\n[DELETED FILES]")
+        for file in changes["deleted"]:
+            print(f" - {file}")
+
+# IMPLEMENTATION
 WATCHED_DIR = BASE_DIR / "watched"
-baseline_hashes = scan_and_hash_directory(WATCHED_DIR)
-# for file, hash_value in baseline_hashes.items():    
-#     print(f"{file} -> {hash_value}")
-
 BASELINE_FILE = BASE_DIR / "baseline.json"
-# Save baseline
-with open(BASELINE_FILE, "w") as f:
-    json.dump(baseline_hashes, f, indent=4)
 
-print(f"[INFO] Baseline saved to {BASELINE_FILE}")
+if not BASELINE_FILE.exists():
+    baseline_hashes = scan_and_hash_directory(WATCHED_DIR, algorithm="sha256")
+    with open(BASELINE_FILE, "w") as f:
+        json.dump(baseline_hashes, f, indent=4)
+    print(f"[INFO] Baseline created at {BASELINE_FILE}")
+else:
+    print(f"[INFO] Baseline already exists at {BASELINE_FILE}")
+
+baseline_hashes = load_baseline(BASELINE_FILE)
+current_hashes = scan_and_hash_directory(WATCHED_DIR, algorithm="sha256")
+
+changes = compare_with_baseline(baseline_hashes, current_hashes)
+
+print_changes(changes)
