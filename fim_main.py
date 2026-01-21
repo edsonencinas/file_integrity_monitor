@@ -2,6 +2,7 @@ import hashlib
 import os
 import json
 import logging
+import argparse
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -9,6 +10,33 @@ LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 LOG_FILE = LOG_DIR / "fim.log"
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="File Interity Monitoring (FIM) Tool"
+    )
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Initialize baseline hashes"
+    )
+
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check files against baseline"
+    )
+
+    return parser.parse_args()
+
+def validate_arguments(args):
+    if not args.init and not args.check:
+        logger.error("No action specified. Use --init or --check.")
+        exit(1)
+    
+    if args.init and args.check:
+        logger.error("Choose only one action: --init OR --check.")
+        exit(1)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,54 +107,61 @@ def scan_and_hash_directory(directory_path, algorithm="sha256"):
     logger.info(f"Scan completed. Files hashed: {len(file_hashes)}")
     return file_hashes
 
-def load_baseline(baseline_file):
-    """
-    Load baseline hashes from a JSON file.
-
-    :param baseline_file: Path to baseline.json
-    :return: Dictionary {relative_path: hash}
-    """
+def load_baseline(baseline_file):    
+    if not baseline_file.exists():
+        logger.error("Baseline file not found. Run with --init first.")
+        exit(1)
+    
     try:
         with open(baseline_file, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"[ERROR] Baseline file not found: {baseline_file}")
-    except json.JSONDecodeError:
-        print(f"[ERROR] Invalid JSON in baseline file: {baseline_file}")
-    except Exception as e:
-        print(f"[ERROR] {e}")
+            baseline_hashes=json.load(f)
 
-    return {}
+        logger.info("Baseline loaded successfully.")
+        return baseline_hashes
+
+    except Exception as e:
+        logger.error(f"Failed to load baseline: {e}")
+        exit(1)    
+
+
+def save_baseline(baseline_hashes, baseline_file):
+    try:
+        with open(baseline_file, "w")as f:
+            json.dump(baseline_hashes, f, indent=4)
+        
+        logger.info(f"Baseline save to {baseline_file}")
+
+    except Exception as e:
+        logger.error(f"Failed to sabe baseline: {e}")
 
 def compare_with_baseline(baseline_hashes, current_hashes):
     """
     Compare baseline hashes with current hashes.
 
-    :param baseline_hashes: Dict from baseline.json
-    :param current_hashes: Dict from current scan
-    :return: Dict with detected changes
+    :param baseline_hashes: Dict {file_path: hash}
+    :param current_hashes: Dict {file_path: hash}
+    :return: dict containing detected changes
     """
     changes = {
-        "modified": [],
         "new": [],
-        "deleted": []
+        "deleted": [],
+        "modified": []
     }
 
-    baseline_files = set(baseline_hashes.keys())
-    current_files = set(current_hashes.keys())
+    # baseline_files = set(baseline_hashes.keys())
+    # current_files = set(current_hashes.keys())
 
-    # Modified files
-    for file in baseline_files & current_files:
-        if baseline_hashes[file] != current_hashes[file]:
-            changes["modified"].append(file)
-
-    # New files
-    for file in current_files - baseline_files:
-        changes["new"].append(file)
-
-    # Deleted files
-    for file in baseline_files - current_files:
-        changes["deleted"].append(file)
+    # Detect new and modified files.
+    for file_path, current_hash in current_hashes.items():
+        if file_path not in baseline_hashes:
+            changes["new"].append(file_path)
+        elif baseline_hashes[file_path] != current_hash:
+            changes["modified"].append(file_path)
+    
+    # Detect deleted files
+    for file_path in baseline_hashes:
+        if file_path not in current_hashes:
+            changes["deleted"].append(file_path)   
 
     return changes
 
@@ -135,10 +170,10 @@ def print_changes(changes):
         logger.info("No file changes detected.")
         return
 
-    for file in changes["added"]:
+    for file in changes["new"]:
         logger.warning(f"New file detected: {file}")
 
-    for file in changes["removed"]:
+    for file in changes["deleted"]:
         logger.warning(f"File removed: {file}")
 
     for file in changes["modified"]:
@@ -148,17 +183,23 @@ def print_changes(changes):
 WATCHED_DIR = BASE_DIR / "watched"
 BASELINE_FILE = BASE_DIR / "baseline.json"
 
-if not BASELINE_FILE.exists():
-    baseline_hashes = scan_and_hash_directory(WATCHED_DIR, algorithm="sha256")
-    with open(BASELINE_FILE, "w") as f:
-        json.dump(baseline_hashes, f, indent=4)
-    print(f"[INFO] Baseline created at {BASELINE_FILE}")
-else:
-    print(f"[INFO] Baseline already exists at {BASELINE_FILE}")
+#------ MAIN CONTROL -------
+if __name__ == "__main__":
+    args= parse_arguments()
+    validate_arguments(args)
 
-baseline_hashes = load_baseline(BASELINE_FILE)
-current_hashes = scan_and_hash_directory(WATCHED_DIR, algorithm="sha256")
+    if args.init:
+        logger.info("Initializing baseline...")
+        baseline_hashes=scan_and_hash_directory(WATCHED_DIR)
+        save_baseline(baseline_hashes, BASELINE_FILE)
+        logger.info("Baseline successfully created.")
 
-changes = compare_with_baseline(baseline_hashes, current_hashes)
+    elif args.check:
+        logger.info("Checking file integrity...")
+        baseline_hashes=load_baseline(BASELINE_FILE)
+        current_hashes=scan_and_hash_directory(WATCHED_DIR)
+        changes=compare_with_baseline(baseline_hashes,current_hashes)
+        print_changes(changes)
 
-print_changes(changes)
+
+
