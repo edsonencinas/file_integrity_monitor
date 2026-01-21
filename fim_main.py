@@ -124,15 +124,37 @@ def load_baseline(baseline_file):
         exit(1)    
 
 
-def save_baseline(baseline_hashes, baseline_file):
+def save_baseline(baseline_hashes, baseline_file, algorithm="sha256"):
     try:
         with open(baseline_file, "w")as f:
             json.dump(baseline_hashes, f, indent=4)
+
+        baseline_hash=get_file_hash(baseline_file, algorithm)
         
-        logger.info(f"Baseline save to {baseline_file}")
+        with open(BASELINE_HASH_FILE, "w") as f:
+            f.write(baseline_hash)
+
+        logger.info("Baseline and baseline hash saved securely")
 
     except Exception as e:
-        logger.error(f"Failed to sabe baseline: {e}")
+        logger.error(f"Failed to save baseline: {e}")
+        exit(1)
+
+def verify_baseline_integrity(baseline_file, baseline_hash_file, algorithm="sha256"):
+    if not baseline_hash_file.exists():
+        logger.critical("Baseline hash file missing! Possible tampering.")
+        exit(1)
+    
+    current_hash= get_file_hash(baseline_file, algorithm)
+
+    with open(baseline_hash_file, "r") as f:
+        stored_hash=f.read().strip()
+
+    if current_hash != stored_hash:
+        logger.critical("Baseline integrity check FAILED! Baseline was modified.")
+        exit(1)
+    
+    logger.info("Baseline integrity verified.")
 
 def compare_with_baseline(baseline_hashes, current_hashes):
     """
@@ -182,7 +204,7 @@ def print_changes(changes):
 # IMPLEMENTATION
 WATCHED_DIR = BASE_DIR / "watched"
 BASELINE_FILE = BASE_DIR / "baseline.json"
-
+BASELINE_HASH_FILE = BASE_DIR / "baseline.hash"
 #------ MAIN CONTROL -------
 if __name__ == "__main__":
     args= parse_arguments()
@@ -195,6 +217,9 @@ if __name__ == "__main__":
         logger.info("Baseline successfully created.")
 
     elif args.check:
+        logger.info("Verifying baseline integrity...")
+        verify_baseline_integrity(BASELINE_FILE, BASELINE_HASH_FILE)
+
         logger.info("Checking file integrity...")
         baseline_hashes=load_baseline(BASELINE_FILE)
         current_hashes=scan_and_hash_directory(WATCHED_DIR)
